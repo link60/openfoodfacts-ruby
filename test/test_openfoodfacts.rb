@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'minitest_helper'
+require 'stringio'
 
 class TestOpenfoodfacts < Minitest::Test
   # Gem
@@ -361,10 +362,12 @@ class TestOpenfoodfacts < Minitest::Test
   # HTTP Client
 
   def test_http_get_user_agent
+    timeouts = { open_timeout: ::Openfoodfacts::OPEN_TIMEOUT, read_timeout: ::Openfoodfacts::READ_TIMEOUT }
+
     # Test with User-Agent set
     ENV['OPENFOODFACTS_USER_AGENT'] = 'test-agent'
     uri_mock = Minitest::Mock.new
-    uri_mock.expect :open, nil, [{ 'User-Agent' => 'test-agent' }]
+    uri_mock.expect :open, nil, [timeouts.merge('User-Agent' => 'test-agent')]
 
     URI.stub :parse, uri_mock do
       ::Openfoodfacts.http_get('https://example.com')
@@ -375,12 +378,50 @@ class TestOpenfoodfacts < Minitest::Test
     # Test without User-Agent
     ENV.delete('OPENFOODFACTS_USER_AGENT')
     uri_mock = Minitest::Mock.new
-    uri_mock.expect :open, nil, [{}]
+    uri_mock.expect :open, nil, [timeouts]
 
     URI.stub :parse, uri_mock do
       ::Openfoodfacts.http_get('https://example.com')
     end
 
     assert_mock uri_mock
+  end
+
+  def test_http_post_sends_user_agent
+    ENV['OPENFOODFACTS_USER_AGENT'] = 'test-agent'
+    stub = stub_request(:post, 'https://world.openfoodfacts.org/cgi/product_jqm.pl')
+           .with(headers: { 'User-Agent' => 'test-agent' }, body: { 'code' => '123' })
+           .to_return(status: 200, body: '{"status":1}')
+
+    ::Openfoodfacts.http_post('https://world.openfoodfacts.org/cgi/product_jqm.pl', { 'code' => '123' })
+
+    assert_requested(stub)
+  ensure
+    ENV.delete('OPENFOODFACTS_USER_AGENT')
+  end
+
+  def test_it_adds_product_image
+    ENV['OPENFOODFACTS_USER_AGENT'] = 'test-agent'
+    stub = stub_request(:post, 'https://world.openfoodfacts.org/cgi/product_image_upload.pl')
+           .with(headers: { 'User-Agent' => 'test-agent' })
+           .to_return(status: 200, body: '{"status":"status ok","imgid":"1"}')
+
+    product = ::Openfoodfacts::Product.new(code: '3029330003533', lc: 'world')
+    user = ::Openfoodfacts::User.new(user_id: 'tester', password: 'secret')
+    result = product.add_image(StringIO.new('fake-image-bytes'), imagefield: 'front', user: user)
+
+    assert result
+    assert_requested(stub)
+  ensure
+    ENV.delete('OPENFOODFACTS_USER_AGENT')
+  end
+
+  def test_product_url_falls_back_to_product_prefix
+    # fr is explicitly mapped to "produit"
+    assert_equal 'https://fr.openfoodfacts.org/api/v2/produit/123.json',
+                 ::Openfoodfacts::Product.url('123', locale: 'fr')
+    # de / es are not mapped -> fall back to "product" (was a broken "api/v2//" before)
+    assert_equal 'https://de.openfoodfacts.org/api/v2/product/123.json',
+                 ::Openfoodfacts::Product.url('123', locale: 'de')
   end
 end

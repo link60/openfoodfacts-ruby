@@ -32,10 +32,13 @@ module Openfoodfacts
 
       # Return product API URL
       #
-      def url(code, locale: DEFAULT_LOCALE, domain: DEFAULT_DOMAIN)
+      def url(code, locale: DEFAULT_LOCALE, domain: Openfoodfacts.domain)
         return unless code
 
-        prefix = LOCALE_WEBURL_PREFIXES[locale]
+        # The API path segment is "product" in English. Fall back to it for
+        # locales absent from LOCALE_WEBURL_PREFIXES (en, de, es, it...),
+        # otherwise the path would be "api/v2//<code>.json" and 404.
+        prefix = LOCALE_WEBURL_PREFIXES[locale] || 'product'
         path = "api/v2/#{prefix}/#{code}.json"
         "https://#{locale}.#{domain}/#{path}"
       end
@@ -43,14 +46,14 @@ module Openfoodfacts
       # Search products
       #
       def search(terms, locale: DEFAULT_LOCALE, page: 1, page_size: 20, sort_by: 'unique_scans_n',
-                 domain: DEFAULT_DOMAIN)
+                 domain: Openfoodfacts.domain)
         terms = CGI.escape(terms)
         path = "cgi/search.pl?search_terms=#{terms}&json=1&page=#{page}&page_size=#{page_size}&sort_by=#{sort_by}"
         url = "https://#{locale}.#{domain}/#{path}"
         json = Openfoodfacts.http_get(url).read
         hash = JSON.parse(json)
         products = []
-        hash['products'].each do |data|
+        Array(hash['products']).each do |data|
           products << new(data)
         end
         products
@@ -225,14 +228,13 @@ module Openfoodfacts
     # User can be nil
     # Tested not updatable fields: countries, ingredients_text, purchase_places, purchase_places_tag, purchase_places_tags
     #
-    def update(user: nil, domain: DEFAULT_DOMAIN)
+    def update(user: nil, domain: Openfoodfacts.domain)
       if code && lc
         subdomain = lc == 'world' ? 'world' : "world-#{lc}"
-        path = 'cgi/product_jqm.pl'
-        uri = URI("https://#{subdomain}.#{domain}/#{path}")
+        url = "https://#{subdomain}.#{domain}/cgi/product_jqm.pl"
         params = to_hash
         params.merge!('user_id' => user.user_id, 'password' => user.password) if user
-        response = Net::HTTP.post_form(uri, params)
+        response = Openfoodfacts.http_post(url, params)
 
         data = JSON.parse(response.body)
         data['status'] == 1
@@ -242,6 +244,44 @@ module Openfoodfacts
     end
     alias save update
 
+    # Upload a product image to Open Food Facts.
+    #
+    # `io` is any object responding to #read (e.g. a File or StringIO holding
+    # the already-encoded image bytes). `imagefield` is the OFF image slot:
+    # 'front', 'ingredients', 'nutrition', 'packaging' or 'other'.
+    # OFF requires authentication for image upload: pass a User — only its
+    # user_id / password are read, so it can be built locally
+    # (User.new(user_id:, password:)) without a round-trip login.
+    #
+    # Returns true when OFF accepted the upload, false otherwise.
+    def add_image(io, imagefield: 'front', filename: nil, content_type: 'image/jpeg', user: nil,
+                  domain: Openfoodfacts.domain)
+      return false unless code && lc
+
+      subdomain = lc == 'world' ? 'world' : "world-#{lc}"
+      url = "https://#{subdomain}.#{domain}/cgi/product_image_upload.pl"
+      parts = [
+        ['code', code.to_s],
+        ['lc', lc.to_s],
+        ['imagefield', imagefield.to_s],
+        ["imgupload_#{imagefield}", io, { filename: filename || "#{code}.jpg", content_type: content_type }]
+      ]
+      if user
+        parts << ['user_id', user.user_id.to_s]
+        parts << ['password', user.password.to_s]
+      end
+
+      response = Openfoodfacts.http_post_multipart(url, parts)
+      return false unless response.is_a?(Net::HTTPSuccess)
+
+      data = begin
+        JSON.parse(response.body)
+      rescue JSON::ParserError
+        {}
+      end
+      data['error'].to_s.empty? && !data['status'].to_s.include?('not ok')
+    end
+
     # Return Product API URL
     #
     def url(locale: DEFAULT_LOCALE)
@@ -250,7 +290,7 @@ module Openfoodfacts
 
     # Return Product web URL according to locale
     #
-    def weburl(locale: nil, domain: DEFAULT_DOMAIN)
+    def weburl(locale: nil, domain: Openfoodfacts.domain)
       locale ||= lc || DEFAULT_LOCALE
 
       if code && (prefix = LOCALE_WEBURL_PREFIXES[locale])

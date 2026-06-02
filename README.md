@@ -69,6 +69,16 @@ All data is available for World, French, UK and US version for now. You should u
 ```ruby
 require 'openfoodfacts'
 
+# Configuration
+#
+# Open Food Facts requires a User-Agent identifying your app on every call,
+# including writes (format: "AppName/Version (contact)"). Set it once:
+#   ENV['OPENFOODFACTS_USER_AGENT'] = 'MyApp/1.0 (contact@example.com)'
+#
+# Optionally target another server (e.g. the staging instance):
+#   ENV['OPENFOODFACTS_DOMAIN'] = 'openfoodfacts.net'
+#   # or, at runtime: Openfoodfacts.domain = 'openfoodfacts.net'
+
 # Browse a product
 
 code = "3029330003533"
@@ -87,6 +97,19 @@ if user
     product.brands = "Jacquet"
     product.update
     # true
+end
+
+# Upload a product image
+#
+# Authentication is required. The user only needs user_id / password, so it can
+# be built locally without a round-trip login. `imagefield` is the OFF image
+# slot: 'front', 'ingredients', 'nutrition', 'packaging' or 'other'.
+
+user = Openfoodfacts::User.new(user_id: "USERNAME", password: "PASSWORD")
+product = Openfoodfacts::Product.new(code: "3029330003533", lc: "fr")
+File.open("front.jpg", "rb") do |io|
+  product.add_image(io, imagefield: "front", user: user)
+  # => true
 end
 
 # Search products

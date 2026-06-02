@@ -7,16 +7,15 @@ module Openfoodfacts
     class << self
       # Login
       #
-      def login(user_id, password, locale: DEFAULT_LOCALE, domain: DEFAULT_DOMAIN)
-        path = 'cgi/session.pl'
-        uri = URI("https://#{locale}.#{domain}/#{path}")
+      def login(user_id, password, locale: DEFAULT_LOCALE, domain: Openfoodfacts.domain)
+        url = "https://#{locale}.#{domain}/cgi/session.pl"
         params = {
           'jqm' => '1',
           'user_id' => user_id,
           'password' => password
         }
 
-        response = Net::HTTP.post_form(uri, params)
+        response = Openfoodfacts.http_post(url, params)
         return nil if response.code != '200'
 
         data = JSON.parse(response.body)
