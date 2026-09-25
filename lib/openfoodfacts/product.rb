@@ -7,7 +7,9 @@ require 'nokogiri'
 
 module Openfoodfacts
   class Product < Hashie::Mash
-    # disable_warnings
+    # The Open Food Facts API exposes these fields. They collide with methods
+    # inherited from Hash, Kernel and this class, but remain safe via #[].
+    disable_warnings :values, :display, :url
     # TODO: Add more locales
     LOCALE_WEBURL_PREFIXES = {
       'fr' => 'produit',

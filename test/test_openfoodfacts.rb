@@ -48,6 +48,27 @@ class TestOpenfoodfacts < Minitest::Test
     assert_equal "https://world.openfoodfacts.org/product/#{product.code}", product.weburl(locale: 'world')
   end
 
+  def test_it_silences_warnings_for_known_api_field_collisions
+    output = StringIO.new
+    original_logger = Hashie.logger
+    Hashie.logger = Logger.new(output)
+
+    product = ::Openfoodfacts::Product.new(
+      code: '3029330003533',
+      values: ['a value'],
+      display: 'a display value',
+      url: 'https://world.openfoodfacts.org/product/3029330003533'
+    )
+
+    assert_empty output.string
+    assert_equal ['a value'], product['values']
+    assert_equal 'a display value', product['display']
+    assert_equal 'https://world.openfoodfacts.org/product/3029330003533', product['url']
+    assert_equal ::Openfoodfacts::Product.url(product.code, locale: 'world'), product.url(locale: 'world')
+  ensure
+    Hashie.logger = original_logger
+  end
+
   def test_it_fetches_product
     product_code = '3029330003533'
 
